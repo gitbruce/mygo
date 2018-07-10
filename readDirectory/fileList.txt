@@ -1,1 +1,2 @@
-dcompress_test.go
+dcompress
+dcompress_test

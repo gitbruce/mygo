@@ -1,4 +1,5 @@
 {
     "Input_directory":	"/Users/brucezhang/Documents/tmp",
-    "Output_directory": "/Users/brucezhang/Documents/tmp/output"
+    "Output_directory": "/Users/brucezhang/Documents/tmp/output",
+    "Remove_duplicate" : 1
 }

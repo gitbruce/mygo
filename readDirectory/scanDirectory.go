@@ -2,9 +2,9 @@ package main
 
 import (
 	"archive/tar"
+	"bufio"
 	"github.com/hotei/dcompress"
 	"io"
-	"bufio"
 	"io/ioutil"
 	"log"
 	"os"
@@ -17,29 +17,31 @@ import (
 type Configuration struct {
 	Input_directory  string
 	Output_directory string
+	Remove_duplicate int
 }
 
 const Extention = "tar.Z"
 const DirectoryConfigFile = "config.json"
 const FileListFile = "fileList.txt"
 
-func checkInputDirecotry(inputDir string, ouputDir string, fileListMap map[string]bool) {
-	files, err := ioutil.ReadDir(inputDir)
+func checkInputDirecotry(config Configuration, fileListMap map[string]bool) {
+	files, err := ioutil.ReadDir(config.Input_directory)
 	if err != nil {
 		log.Fatal(err)
 	}
+	existingFiles := make(map[string]string)
 
 	for _, f := range files {
 		fileName := f.Name()
 		if strings.Contains(fileName, Extention) {
 			log.Println("processing " + fileName)
-			processCompressFile(filepath.Join(inputDir, fileName), ouputDir, fileListMap)
+			processCompressFile(filepath.Join(config.Input_directory, fileName), config, fileListMap, existingFiles)
 		}
 	}
 
 }
 
-func processCompressFile(fileName string, ouputDir string, fileListMap map[string]bool) {
+func processCompressFile(fileName string, config Configuration, fileListMap map[string]bool, existingFiles map[string]string) {
 	f, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -63,25 +65,44 @@ func processCompressFile(fileName string, ouputDir string, fileListMap map[strin
 		}
 
 		name := header.Name
-
 		switch header.Typeflag {
 		case tar.TypeDir:
 			continue
 		case tar.TypeReg:
 			{
-//				log.Println("(", i, ")", "Name: ", name, " with size: ", header.Size)
-				if (fileListMap[name]) {
+				key := findKey(name, fileListMap)
+				if key != "" {
 					log.Println("found a file ", name)
-					target := filepath.Join(ouputDir, name)
-					outFile, err := os.Create(target)
-					if err != nil {
-						log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
+					target := filepath.Join(config.Output_directory, getFileName(name))
+					newFileName := getFileName(name)
+					createFileFlag := true
+					if config.Remove_duplicate == 1 {
+
+						existingFileName := existingFiles[key]
+						if existingFileName != "" {
+							if existingFileName < newFileName {
+								existingFiles[key] = newFileName
+								existingTarget := filepath.Join(config.Output_directory, existingFileName)
+								os.Remove(existingTarget)
+								log.Println("removed file", existingFileName, "because", newFileName, "is newer")
+							} else {
+								createFileFlag = false
+							}
+						} else {
+							existingFiles[key] = newFileName
+						}
 					}
-					defer outFile.Close()
-					if _, err := io.Copy(outFile, tarReader); err != nil {
-						log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+					if createFileFlag {
+						outFile, err := os.Create(target)
+						if err != nil {
+							log.Fatalf("ExtractTarGz: Create() failed: %s", err.Error())
+						}
+						defer outFile.Close()
+						if _, err := io.Copy(outFile, tarReader); err != nil {
+							log.Fatalf("ExtractTarGz: Copy() failed: %s", err.Error())
+						}
 					}
-				} 
+				}
 			}
 
 		default:
@@ -97,6 +118,20 @@ func processCompressFile(fileName string, ouputDir string, fileListMap map[strin
 	}
 }
 
+func getFileName(fileName string) string {
+	parts := strings.Split(fileName, "/")
+	return parts[len(parts)-1]
+}
+
+func findKey(fileName string, fileListMap map[string]bool) string {
+	for k, _ := range fileListMap {
+		if strings.Contains(fileName, k) {
+			return k
+		}
+	}
+	return ""
+}
+
 func readFileList(fileName string) map[string]bool {
 	file, err := os.Open(fileName)
 	if err != nil {
@@ -107,8 +142,11 @@ func readFileList(fileName string) map[string]bool {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !seen[line] {
-			seen[line] = true
+		if !seen[line+"_1"] {
+			seen[line+"_1"] = true
+		}
+		if !seen[line+"_2"] {
+			seen[line+"_2"] = true
 		}
 	}
 	log.Println("loaded file list ", len(seen))
@@ -127,9 +165,10 @@ func main() {
 		os.Exit(500)
 	}
 
-	log.Println("input: " + configuration.Input_directory)
-	log.Println("output: " + configuration.Output_directory)
+	log.Println("input in config file", configuration.Input_directory)
+	log.Println("output in config file", configuration.Output_directory)
+	log.Println("remove duplicate in config file", configuration.Remove_duplicate)
 	createDir(configuration.Output_directory)
 	fileListMap := readFileList(FileListFile)
-	checkInputDirecotry(configuration.Input_directory, configuration.Output_directory, fileListMap)
+	checkInputDirecotry(configuration, fileListMap)
 }
